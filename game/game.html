@@ -1,30 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>Title</title>
 </head>
+
 <body>
-<h1>Block Stacking Game</h1>
-<game-menu>
     <h1>Block Stacking Game</h1>
-    <div id="main-menu">
-        <p id="status">You can use your arrow keys or WASD to control the shapes, ENTER to instantly place, press ESC to return to this menu.</p>
-        <button id="play">Play</button>
-        <button id="restart">Restart</button>
-        <button id="debug">Debug Information</button>
-        <button id="settings" disabled>Settings</button>
-        <button id="github">Source Code</button>
-    </div>
-    <div id="debug-menu" class="hide">
-        <h2>Debug Information</h2>
-        <p id="debug-info">Hi from littie :)</p>
-        <button id="logs" disabled>Debug Logs</button>
-        <button id="back">Back</button>
-    </div>
-</game-menu>
-<game-grid>
-</game-grid>
+    <game-menu>
+        <h1>Block Stacking Game</h1>
+        <div id="main-menu">
+            <p id="status">You can use your arrow keys or WASD to control the shapes, ENTER to instantly place, press
+                ESC to return to this menu.</p>
+            <button id="play">Play</button>
+            <button id="restart">Restart</button>
+            <button id="debug">Debug Information</button>
+            <button id="settings" disabled>Settings</button>
+            <button id="github">Source Code</button>
+        </div>
+        <div id="debug-menu" class="hide">
+            <h2>Debug Information</h2>
+            <p id="debug-info" class="debug">Hi from littie :)</p>
+            <button id="logs" disabled>Debug Logs</button>
+            <button id="back">Back</button>
+        </div>
+    </game-menu>
+    <game>
+        <game-grid>
+        </game-grid>
+        <shape-preview>
+        </shape-preview>
+    </game>
 </body>
 
 <script src="./wasm_exec.js"></script>
@@ -41,8 +48,9 @@
         margin: 0;
         padding: 0;
         width: 100%;
+        height: 100vh;
         background-color: #3b0903;
-        font-family: Arial,sans-serif;
+        font-family: Arial, sans-serif;
     }
 
     h1 {
@@ -54,7 +62,7 @@
     }
 
     button {
-        font-family: "Arial Black", Arial,sans-serif;
+        font-family: "Arial Black", Arial, sans-serif;
         display: block;
         background-color: #7f7f7f;
         border: none;
@@ -81,6 +89,23 @@
         display: none !important;
     }
 
+    p.debug {
+        background: #1a1a1a;
+        padding: 1em;
+        border-radius: .5em;
+        font-family: monospace, sans-serif;
+        width: 60%;
+        text-align: left;
+    }
+
+    game {
+        display: block;
+        width: 100%;
+        justify-content: center;
+        align-items: center;
+        display: flex;
+    }
+
     game-menu {
         position: absolute;
         left: 0;
@@ -89,6 +114,7 @@
         height: 100%;
         display: block;
         background-color: #000000BB;
+        z-index: 5;
     }
 
     game-menu button {
@@ -113,14 +139,40 @@
         margin-bottom: 2em;
     }
 
-    game-grid {
-        margin: auto;
+    shape-preview {
+        display: inline-block;
+        padding: 3px;
+        margin-left: 1em;
+        width: fit-content;
+        border: #7f7f7f 2px solid;
+        border-radius: 5px;
+    }
+
+    shape-preview game-row {
         display: block;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        height: 22px;
+    }
+
+    shape-preview game-square {
+        background: none;
+        width: 20px;
+        height: 20px;
+        margin: 1px;
+        display: inline-block;
+        border-radius: 2.5px;
+    }
+
+    game-grid {
+        display: inline-block;
         padding: 5px;
         width: fit-content;
         border: gray 5px solid;
         border-radius: 10px;
     }
+
     game-row {
         display: block;
         width: 100%;
@@ -128,6 +180,7 @@
         padding: 0;
         height: 39px;
     }
+
     game-square {
         background-color: gray;
         width: 35px;
@@ -137,4 +190,5 @@
         border-radius: 2.5px;
     }
 </style>
+
 </html>

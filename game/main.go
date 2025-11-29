@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -10,7 +11,24 @@ import (
 	"time"
 )
 
+const GridWidth = 10
+const GridHeight = 20
+
+type ShapeId int8
+
 const (
+	ShapeNone ShapeId = iota
+	LShape
+	LShape2
+	IShape
+	OShape
+	PShape
+	SShape
+	SShape2
+)
+
+const (
+	ColorGreyDark   = "#565656"
 	ColorGrey       = "#7f7f7f"
 	ColorYellow     = "#ff0"
 	ColorYellowDark = "#aa0"
@@ -27,6 +45,50 @@ const (
 	ColorPurple     = "#f07"
 	ColorPurpleDark = "#d05"
 )
+
+func (s ShapeId) ActiveColor() string {
+	switch s {
+	case LShape:
+		return ColorOrangeDark
+	case LShape2:
+		return ColorPinkDark
+	case IShape:
+		return ColorYellowDark
+	case OShape:
+		return ColorBlueDark
+	case PShape:
+		return ColorPurpleDark
+	case SShape:
+		return ColorGreenDark
+	case SShape2:
+		return ColorRedDark
+	default:
+		return ColorGreyDark
+	}
+}
+
+func (s ShapeId) Color() string {
+	switch s {
+	case LShape:
+		return ColorOrange
+	case LShape2:
+		return ColorPink
+	case IShape:
+		return ColorYellow
+	case OShape:
+		return ColorBlue
+	case PShape:
+		return ColorPurple
+	case SShape:
+		return ColorGreen
+	case SShape2:
+		return ColorRed
+	default:
+		return ColorGrey
+	}
+}
+
+type Mask [][]bool
 
 var LShapeMask = [][]bool{
 	{true, true},
@@ -70,38 +132,80 @@ var SShapeMask2 = [][]bool{
 	{false, true},
 }
 
-var game = struct {
-	Grid             [20][10]string
+func (s ShapeId) Mask() [][]bool {
+	switch s {
+	case LShape:
+		return LShapeMask
+	case LShape2:
+		return LShapeMask2
+	case OShape:
+		return OShapeMask
+	case IShape:
+		return IShapeMask
+	case PShape:
+		return PShapeMask
+	case SShape:
+		return SShapeMask
+	case SShape2:
+		return SShapeMask2
+	default:
+		fmt.Println("Using default shape mask for shape id:", s)
+		return LShapeMask
+	}
+}
+
+type Game struct {
+	Grid             [GridHeight][GridWidth]ShapeId
 	CurrentPosition  [2]int
 	CurrentShapeMask [][]bool
-	CurrentShape     int
-	NextShape        int
+	CurrentShape     ShapeId
+	NextShape        ShapeId
 	Score            int
 	Paused           bool
-}{
-	NextShape: rand.Intn(7),
+	ShowHint         bool
+}
+
+var game = Game{
+	NextShape: RandomShape(),
 	Paused:    true,
+	ShowHint:  true,
 }
 
 func main() {
 	fmt.Println("Hi from littie :0")
-	gameGrid := GameGrid()
+	shapePreviewGrid := QuerySelector("shape-preview")
+	gameGrid := QuerySelector("game-grid")
+	gameCtx, cancel := context.WithCancel(context.Background())
+
+	js.Global().Set("destroy", js.FuncOf(func(value js.Value, args []js.Value) interface{} {
+		cancel()
+		return nil
+	}))
+
 	document := Document()
-	for range 20 {
+	// Create the shape preview grid
+	for range 4 {
 		gameRow := document.Call("createElement", "game-row")
-		for range 10 {
+		for range 2 {
+			gameSquare := document.Call("createElement", "game-square")
+			gameRow.Call("appendChild", gameSquare)
+		}
+		shapePreviewGrid.Call("appendChild", gameRow)
+	}
+
+	// Create the game grid
+	for range GridHeight {
+		gameRow := document.Call("createElement", "game-row")
+		for range GridWidth {
 			gameSquare := document.Call("createElement", "game-square")
 			gameRow.Call("appendChild", gameSquare)
 		}
 		gameGrid.Call("appendChild", gameRow)
 	}
 
-	QuerySelector("game-menu #play").Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
-	QuerySelector("game-menu #restart").Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
-	QuerySelector("game-menu #debug").Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
-	QuerySelector("game-menu #back").Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
-	QuerySelector("game-menu #settings").Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
-	QuerySelector("game-menu #github").Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
+	for _, buttonId := range []string{"play", "restart", "debug", "back", "settings", "github"} {
+		QuerySelector("game-menu #"+buttonId).Call("addEventListener", "click", js.FuncOf(MenuButtonHandler))
+	}
 
 	NextShape()
 
@@ -115,17 +219,23 @@ func main() {
 	go func() {
 		for {
 			RenderGrid()
+			if game.ShowHint {
+				RenderActiveShapeHint()
+			}
 			RenderActiveShape()
 			time.Sleep(100 * time.Millisecond)
 		}
 	}()
 
 	for { // Move Tick
-		time.Sleep(1 * time.Second)
-		MoveTick()
+		select {
+		case <-gameCtx.Done():
+			return
+		default:
+			time.Sleep(1 * time.Second)
+			MoveTick()
+		}
 	}
-
-	//<-make(chan struct{})
 }
 
 func Document() js.Value {
@@ -134,10 +244,6 @@ func Document() js.Value {
 
 func QuerySelector(elementQuery string) js.Value {
 	return Document().Call("querySelector", elementQuery)
-}
-
-func GameGrid() js.Value {
-	return QuerySelector("game-grid")
 }
 
 func MenuButtonHandler(this js.Value, args []js.Value) interface{} {
@@ -149,15 +255,16 @@ func MenuButtonHandler(this js.Value, args []js.Value) interface{} {
 		Restart()
 	case "debug":
 		byt, err := json.Marshal(game)
+		fmt.Println(string(byt))
 		if err != nil {
 			byt = []byte("Parse err!")
 		}
-		QuerySelector("#debug-info").Set("innerHTML", string(byt))
+		QuerySelector("#debug-info").Set("innerText", string(byt))
 		ShowMenuPage(1)
 	case "back":
 		ShowMenuPage(0)
 	case "github":
-		js.Global().Get("window").Call("open", "https://github.com/littie6amer/block-stacking")
+		js.Global().Get("window").Call("open", "https://github.com/golittie/block-stacking")
 	}
 	return nil
 }
@@ -178,45 +285,40 @@ func ToggleMenu() {
 func ShowMenuPage(page int) {
 	mainMenu, debug := QuerySelector("game-menu #main-menu"), QuerySelector("game-menu #debug-menu")
 	switch page {
-	case 0:
+	case 0: // Main menu page
 		mainMenu.Set("className", "")
 		debug.Set("className", "hide")
-	case 1:
+	case 1: // Debug page
 		mainMenu.Set("className", "hide")
 		debug.Set("className", "")
 	}
 }
 
 func keyAction(key string) {
-	if game.Paused && key != "Escape" {
+	if key == "Escape" {
+		ToggleMenu()
+	} else if game.Paused {
 		return
 	}
 
 	switch key {
-	case "Escape":
-		ToggleMenu()
 	case "KeyA", "ArrowLeft":
-		{
-			valid := IsValidPosition([2]int{game.CurrentPosition[0] - 1, game.CurrentPosition[1]})
-			//fmt.Println(valid)
-			if !valid {
-				return
-			}
-			game.CurrentPosition[0]--
+		if !IsValidPosition([2]int{game.CurrentPosition[0] - 1, game.CurrentPosition[1]}) {
+			return
 		}
+		game.CurrentPosition[0]--
 	case "KeyD", "ArrowRight":
-		{
-			valid := IsValidPosition([2]int{game.CurrentPosition[0] + 1, game.CurrentPosition[1]})
-			//fmt.Println(valid)
-			if !valid {
-				return
-			}
-			game.CurrentPosition[0]++
+		if !IsValidPosition([2]int{game.CurrentPosition[0] + 1, game.CurrentPosition[1]}) {
+			return
 		}
+		game.CurrentPosition[0] = game.CurrentPosition[0] + 1
 	case "KeyS", "ArrowDown":
 		MoveTick()
 	case "KeyW", "KeyR", "ArrowUp":
 		game.CurrentShapeMask = RotateShape(game.CurrentShapeMask)
+	case "KeyH":
+		game.ShowHint = !game.ShowHint
+		fmt.Println("Show hint:", game.ShowHint)
 	case "KeyN":
 		NextShape()
 	case "Enter":
@@ -229,8 +331,7 @@ func MoveTick() {
 		return
 	}
 
-	yPlace := YPlacePosition()
-	if yPlace == game.CurrentPosition[1]+1 {
+	if game.CurrentPosition[1] == YPlacePosition() {
 		PlaceShape()
 	} else {
 		game.CurrentPosition[1]++
@@ -245,15 +346,19 @@ func IsValidPosition(position [2]int) bool {
 		return true
 	}
 
-	shapeCols := len(game.CurrentShapeMask[0])
-	shapeRows := len(game.CurrentShapeMask)
+	if y+len(shape) > GridHeight {
+		return false
+	}
+
+	shapeCols := len(shape[0])
+	shapeRows := len(shape)
 
 	for r := range shapeRows {
 		for c := range shapeCols {
-			if x+c > 9 || x+c < 0 {
+			if x+c > GridWidth-1 || x+c < 0 {
 				return false
 			}
-			if shape[r][c] && game.Grid[y+r][x+c] != "" {
+			if shape[r][c] && game.Grid[y+r][x+c] != ShapeNone {
 				return false
 			}
 		}
@@ -279,105 +384,72 @@ func RotateShape(shape [][]bool) [][]bool {
 }
 
 func YPlacePosition() int {
-	shape := game.CurrentShapeMask
-	shapeCols := len(game.CurrentShapeMask[0])
-	shapeRows := len(game.CurrentShapeMask)
-	yFloor := 21 - shapeRows
-	highRow := 0
-
-	for r := range shapeRows {
-		for c := range shapeCols {
-			for actualY := game.CurrentPosition[1]; actualY < 20; actualY++ {
-				if !shape[r][c] || actualY <= game.CurrentPosition[1]+r || actualY >= yFloor || (r != shapeRows-1 && shape[r+1][c]) {
-					continue
-				}
-				if actualY == 19 || game.Grid[actualY+1][game.CurrentPosition[0]+c] != "" {
-					yFloor = (actualY + 1) //- (shapeRows - (r + 1))
-					highRow = r
-					break
-				}
-			}
-		}
+	yPlace := game.CurrentPosition[1]
+	for IsValidPosition([2]int{game.CurrentPosition[0], yPlace}) {
+		yPlace++
 	}
-
-	//for tryY := range 19 - game.CurrentPosition[1] /*0-19*/ {
-	//	actualY := 19 - tryY // 0-19
-	//
-	//}
-
-	//return yFloor
-	return yFloor - (highRow + 1)
+	yPlace--
+	return yPlace
 }
 
 func Restart() {
 	game.Paused = true
-	game.Grid = [20][10]string{}
+	game.Grid = [GridHeight][GridWidth]ShapeId{}
 	game.Score = 0
 	NextShape()
 }
 
 func PlaceShape() {
+	x, y := game.CurrentPosition[0], YPlacePosition()
 	shape := game.CurrentShapeMask
-	shapeCols := len(game.CurrentShapeMask[0])
-	shapeRows := len(game.CurrentShapeMask)
-
-	yPlace := YPlacePosition()
-
+	shapeCols := len(shape[0])
+	shapeRows := len(shape)
 	for r := range shapeRows {
 		for c := range shapeCols {
 			if shape[r][c] {
-				game.Grid[yPlace+r][game.CurrentPosition[0]+c] = []string{ColorOrange, ColorPink, ColorYellow, ColorBlue, ColorPurple, ColorGreen, ColorRed}[game.CurrentShape]
+				game.Grid[y+r][x+c] = game.CurrentShape
 			}
 		}
 	}
-	CheckRows()
+
+	CheckForCompleteRows()
 	NextShape()
 }
 
 func NextShape() {
-	switch game.NextShape {
-	case 0:
-		game.CurrentShapeMask = LShapeMask
-	case 1:
-		game.CurrentShapeMask = LShapeMask2
-	case 2:
-		game.CurrentShapeMask = OShapeMask
-	case 3:
-		game.CurrentShapeMask = IShapeMask
-	case 4:
-		game.CurrentShapeMask = PShapeMask
-	case 5:
-		game.CurrentShapeMask = SShapeMask
-	case 6:
-		game.CurrentShapeMask = SShapeMask2
-	}
 	game.CurrentPosition = [2]int{4, 0}
+	game.CurrentShapeMask = game.NextShape.Mask()
 	game.CurrentShape = game.NextShape
 	fmt.Println("Switched to next shape:", game.NextShape)
-	game.NextShape = rand.Intn(7)
+	game.NextShape = RandomShape()
+	RenderNextShape()
+}
+
+func RandomShape() ShapeId {
+	return ShapeId(rand.Intn(7)) + 1
 }
 
 func SetSquareColor(row, col int, hexColor string) {
 	square := QuerySelector(fmt.Sprintf("game-grid :nth-child(%d) :nth-child(%d)", row+1, col+1))
-	if square.Equal(js.Null()) {
+	if square.IsNull() {
 		return
 	}
 	//fmt.Println(fmt.Sprintf("Set %d, %d to %s", row, col, hexColor))
 	style := square.Get("style")
-	style.Set("background-color", hexColor)
+	style.Set("background", hexColor)
 }
 
-func CheckRows() {
-	i := 19
-	var newGrid [20][10]string
-	for r := range 20 {
-		r = 19 - r
+func CheckForCompleteRows() {
+	i := GridHeight - 1
+	var newGrid [GridHeight][GridWidth]ShapeId
+	for r := range GridHeight {
+		r = GridHeight - 1 - r
 		solved := true
-		for c := range 10 {
-			if game.Grid[r][c] == "" {
+		for c := range GridWidth {
+			if game.Grid[r][c] == ShapeNone {
 				solved = false
 			} else if r == 1 {
-				QuerySelector("#status").Set("innerHTML", fmt.Sprintf("You lost :(<br>Your last score was %d", game.Score))
+				QuerySelector("#status").Set("innerHTML", fmt.Sprintf("You lost :(<br>Your score was %d", game.Score))
 				Restart()
 				ToggleMenu()
 				return
@@ -385,9 +457,10 @@ func CheckRows() {
 		}
 		if solved {
 			game.Score++
-			for c := range 10 {
+			for c := range GridWidth {
 				SetSquareColor(r, c, "#fff")
 			}
+			fmt.Println("Line completed!")
 		} else {
 			newGrid[i] = game.Grid[r]
 			i--
@@ -396,15 +469,37 @@ func CheckRows() {
 	game.Grid = newGrid
 }
 
-func RenderGrid() {
-	for r := range 20 {
-		for c := range 10 {
-			color := game.Grid[r][c]
-			if color == "" {
-				color = ColorGrey
-			}
+func SetPreviewSquareColor(row, col int, hexColor string) {
+	square := QuerySelector(fmt.Sprintf("shape-preview :nth-child(%d) :nth-child(%d)", row+1, col+1))
+	if square.IsNull() {
+		return
+	}
+	//fmt.Println(fmt.Sprintf("Set %d, %d to %s", row, col, hexColor))
+	style := square.Get("style")
+	style.Set("background", hexColor)
+}
 
-			SetSquareColor(r, c, color)
+func RenderNextShape() {
+	shape := game.NextShape.Mask()
+	shapeCols := len(shape[0])
+	shapeRows := len(shape)
+
+	fmt.Println("Rendered preview.")
+	for r := range 4 {
+		for c := range 2 {
+			if shapeCols > c && shapeRows > r && shape[r][c] {
+				SetPreviewSquareColor(r, c, game.NextShape.Color())
+			} else {
+				SetPreviewSquareColor(r, c, "none")
+			}
+		}
+	}
+}
+
+func RenderGrid() {
+	for r := range GridHeight {
+		for c := range GridWidth {
+			SetSquareColor(r, c, game.Grid[r][c].Color())
 		}
 	}
 }
@@ -413,22 +508,38 @@ func RenderActiveShape() {
 	position := &game.CurrentPosition
 	shape := game.CurrentShapeMask
 	x, y := position[0], position[1]
-	shapeCols := len(game.CurrentShapeMask[0])
-	shapeRows := len(game.CurrentShapeMask)
+	shapeCols := len(shape[0])
+	shapeRows := len(shape)
 
-	if x > 10-shapeCols {
+	if x > GridWidth-shapeCols {
 		position[0] = 0
 		x = 0
 	}
 	if x < 0 {
-		position[0] = 10 - shapeCols
-		x = 10 - shapeCols
+		position[0] = GridWidth - shapeCols
+		x = GridWidth - shapeCols
 	}
 
 	for r := range shapeRows {
 		for c := range shapeCols {
-			if shape[r][c] == true {
-				SetSquareColor(y+r, x+c, []string{ColorOrangeDark, ColorPinkDark, ColorYellowDark, ColorBlueDark, ColorPurpleDark, ColorGreenDark, ColorRedDark}[game.CurrentShape])
+			if shape[r][c] {
+				SetSquareColor(y+r, x+c, game.CurrentShape.ActiveColor())
+			}
+		}
+	}
+}
+
+func RenderActiveShapeHint() {
+	position := &game.CurrentPosition
+	shape := game.CurrentShapeMask
+	x, y := position[0], YPlacePosition()
+	shapeCols := len(shape[0])
+	shapeRows := len(shape)
+
+	for r := range shapeRows {
+		for c := range shapeCols {
+			if shape[r][c] {
+				SetSquareColor(y+r, x+c, ColorGreyDark)
 			}
 		}
 	}
